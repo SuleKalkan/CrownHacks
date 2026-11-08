@@ -37,6 +37,9 @@ export default function App() {
   const [respirationRate, setRespirationRate] = useState(null);
   const [signalQuality, setSignalQuality] = useState('NO_FINGER'); // NO_FINGER, POOR, GOOD, EXCELLENT
   const [isBeatActive, setIsBeatActive] = useState(false);
+  const [latestAdc, setLatestAdc] = useState(null);
+  const [lastSampleTimestamp, setLastSampleTimestamp] = useState(null);
+  const [samplingCheckTime, setSamplingCheckTime] = useState(0);
 
   // Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -75,6 +78,11 @@ export default function App() {
   const lastFilteredRef = useRef(32768);
 
   const processSample = useCallback((rawVal, timestamp) => {
+    if (!isDemoMode) {
+      setLatestAdc(rawVal);
+      setLastSampleTimestamp(timestamp);
+    }
+
     // 1. Digital Filter (Single-pole low pass filter)
     let filteredVal = rawVal;
     if (filterEnabled) {
@@ -188,7 +196,17 @@ export default function App() {
         }
       ]);
     }
-  }, [filterEnabled, isRecording, recordingStartTime, instantBpm, avgBpm, rmssd]);
+  }, [filterEnabled, isRecording, recordingStartTime, instantBpm, avgBpm, rmssd, isDemoMode]);
+
+  useEffect(() => {
+    if (!isConnected) return;
+
+    const intervalId = setInterval(() => {
+      setSamplingCheckTime(performance.now());
+    }, 250);
+
+    return () => clearInterval(intervalId);
+  }, [isConnected]);
 
   // ==========================================
   // Web Serial API Communication Handler
@@ -340,12 +358,12 @@ export default function App() {
       const height = canvas.height;
 
       // 1. Background clearing
-      ctx.fillStyle = '#090d16';
+      ctx.fillStyle = '#FFF5E1';
       ctx.fillRect(0, 0, width, height);
 
       // 2. Draw Medical Grid lines
       ctx.lineWidth = 1;
-      ctx.strokeStyle = '#162238';
+      ctx.strokeStyle = '#DCC8A3';
       const gridSize = 30;
 
       for (let x = 0; x < width; x += gridSize) {
@@ -362,7 +380,7 @@ export default function App() {
       }
 
       // Center reference baseline
-      ctx.strokeStyle = '#1e293b';
+      ctx.strokeStyle = '#800020';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
@@ -397,7 +415,7 @@ export default function App() {
 
       // 3. Draw Threshold Line if enabled
       if (showThreshold) {
-        ctx.strokeStyle = 'rgba(234, 179, 8, 0.45)';
+        ctx.strokeStyle = 'rgba(128, 0, 32, 0.65)';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         for (let i = 0; i < len; i++) {
@@ -411,8 +429,8 @@ export default function App() {
 
       // 4. Draw Glow / Shadow under PPG Wave
       ctx.shadowBlur = 12;
-      ctx.shadowColor = '#10b981';
-      ctx.strokeStyle = '#10b981';
+      ctx.shadowColor = '#800020';
+      ctx.strokeStyle = '#800020';
       ctx.lineWidth = 2.5;
 
       ctx.beginPath();
@@ -430,13 +448,13 @@ export default function App() {
       // 5. Draw Scanning Head Dot
       const lastX = width - 2;
       const lastY = scaleY(data[len - 1]);
-      ctx.fillStyle = '#34d399';
+      ctx.fillStyle = '#B0303C';
       ctx.beginPath();
       ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
       ctx.fill();
 
       // 6. On-screen scale annotations
-      ctx.fillStyle = '#64748b';
+      ctx.fillStyle = '#5E0F1A';
       ctx.font = '10px monospace';
       ctx.fillText(`ADC Top: ${Math.round(yMax)}`, 10, 16);
       ctx.fillText(`ADC Mid: ${Math.round((yMax + yMin) / 2)}`, 10, height / 2 - 4);
@@ -501,48 +519,57 @@ export default function App() {
   const qualityBadge = useMemo(() => {
     switch (signalQuality) {
       case 'EXCELLENT':
-        return { text: 'Optimal Contact', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' };
+        return { text: 'Optimal Contact', color: 'bg-[#800020]/20 text-[#3B0A12] border-[#DCC8A3]/40' };
       case 'GOOD':
-        return { text: 'Good Signal', color: 'bg-green-500/10 text-green-400 border-green-500/30' };
+        return { text: 'Good Signal', color: 'bg-[#F7ECD4] text-[#9B1D30] border-[#DCC8A3]/50' };
       case 'POOR':
-        return { text: 'Weak Amplitude - Adjust Finger', color: 'bg-amber-500/10 text-amber-400 border-amber-500/30' };
+        return { text: 'Weak Amplitude - Adjust Finger', color: 'bg-[#800020]/30 text-[#3B0A12] border-[#DCC8A3]/50' };
       case 'MOTION_ARTIFACT':
-        return { text: 'Motion Artifact Detected', color: 'bg-red-500/10 text-red-400 border-red-500/30' };
+        return { text: 'Motion Artifact Detected', color: 'bg-[#9B1D30]/20 text-[#3B0A12] border-[#DCC8A3]/50' };
       default:
-        return { text: 'Place Finger Over Sensor', color: 'bg-slate-500/10 text-slate-400 border-slate-500/30' };
+        return { text: 'Place Finger Over Sensor', color: 'bg-[#F7ECD4]/60 text-[#3B0A12]/75 border-[#DCC8A3]/30' };
     }
   }, [signalQuality]);
 
+  const signalQualityLabel = {
+    EXCELLENT: 'Excellent',
+    GOOD: 'Good',
+    POOR: 'Poor',
+    NO_FINGER: 'No Finger',
+    MOTION_ARTIFACT: 'Motion Artifact'
+  }[signalQuality] || 'N/A';
+  const isReceivingData = isConnected && lastSampleTimestamp !== null && samplingCheckTime - lastSampleTimestamp < 1000;
+
   return (
-    <div className="min-h-screen bg-[#070b12] text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-black">
+    <div className="min-h-screen bg-[#FFF5E1] text-[#3B0A12] flex flex-col font-sans selection:bg-[#800020] selection:text-[#FFF5E1]">
       {/* Top Navigation Header */}
-      <header className="border-b border-slate-800/80 bg-[#0c121d]/90 backdrop-blur sticky top-0 z-30 px-4 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4">
+      <header className="border-b border-[#5E0F1A] bg-[#3B0A12]/90 backdrop-blur sticky top-0 z-30 px-4 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
-          <div className="p-2.5 bg-emerald-500/10 rounded-xl border border-emerald-500/30 text-emerald-400">
-            <Heart className={`w-6 h-6 ${isBeatActive ? 'scale-125 text-red-500 fill-red-500 transition-transform duration-100' : 'text-emerald-400 transition-transform'}`} />
+          <div className="p-2.5 bg-[#800020]/30 rounded-xl border border-[#DCC8A3] text-[#FFF5E1]">
+            <Heart className={`w-6 h-6 ${isBeatActive ? 'scale-125 text-[#B0303C] fill-[#B0303C] transition-transform duration-100' : 'text-[#FFF5E1] transition-transform'}`} />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h1 className="font-bold text-lg text-white tracking-tight">PulseWave BioSense</h1>
-              <span className="text-[11px] font-mono uppercase bg-emerald-950 text-emerald-400 px-2 py-0.5 rounded border border-emerald-800">
+              <h1 className="font-bold text-lg text-[#FFF5E1] tracking-tight">PulseWave BioSense</h1>
+              <span className="text-[11px] font-mono uppercase bg-[#800020]/30 text-[#FFF5E1] px-2 py-0.5 rounded border border-[#DCC8A3]">
                 BMES Hackathon
               </span>
             </div>
-            <p className="text-xs text-slate-400">RPi Pico Optical PPG & Pulse-Rate Variability Monitor</p>
+            <p className="text-xs text-[#F7ECD4]">RPi Pico Optical PPG & Pulse-Rate Variability Monitor</p>
           </div>
         </div>
 
         {/* Connectivity Controls */}
         <div className="flex flex-wrap items-center gap-3">
           {/* Baud Rate selector */}
-          <div className="flex items-center space-x-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs">
-            <Cpu className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-slate-400">Baud:</span>
+          <div className="flex items-center space-x-1.5 bg-[#F7ECD4] border border-[#DCC8A3]/30 rounded-lg px-2.5 py-1.5 text-xs">
+            <Cpu className="w-3.5 h-3.5 text-[#3B0A12]/75" />
+            <span className="text-[#3B0A12]/75">Baud:</span>
             <select 
               value={baudRate} 
               disabled={isConnected}
               onChange={(e) => setBaudRate(Number(e.target.value))}
-              className="bg-transparent text-slate-200 outline-none cursor-pointer"
+              className="bg-transparent text-[#3B0A12]/90 outline-none cursor-pointer"
             >
               <option value={9600}>9600</option>
               <option value={57600}>57600</option>
@@ -555,7 +582,7 @@ export default function App() {
           {!isConnected ? (
             <button
               onClick={connectSerial}
-              className="flex items-center space-x-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-4 py-1.5 rounded-lg text-xs transition shadow-md shadow-emerald-950"
+              className="flex items-center space-x-2 bg-[#800020] hover:bg-[#B0303C] text-[#FFF5E1] font-semibold px-4 py-1.5 rounded-lg text-xs transition shadow-md shadow-[#5E0F1A]/20"
             >
               <Zap className="w-4 h-4 fill-current" />
               <span>Connect Pico</span>
@@ -563,7 +590,7 @@ export default function App() {
           ) : (
             <button
               onClick={disconnectSerial}
-              className="flex items-center space-x-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 px-3.5 py-1.5 rounded-lg text-xs transition"
+              className="flex items-center space-x-2 bg-[#5E0F1A] hover:bg-[#B0303C] text-[#FFF5E1] border border-[#DCC8A3] px-3.5 py-1.5 rounded-lg text-xs transition"
             >
               <Square className="w-3.5 h-3.5" />
               <span>Disconnect</span>
@@ -577,9 +604,9 @@ export default function App() {
               setIsDemoMode(!isDemoMode);
             }}
             className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition ${
-              isDemoMode 
-                ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' 
-                : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+              isDemoMode
+                ? 'bg-[#800020]/30 border-[#DCC8A3]/60 text-[#9B1D30]'
+                : 'bg-[#F7ECD4] border-[#DCC8A3]/30 text-[#3B0A12]/75 hover:text-[#3B0A12]'
             }`}
           >
             <Radio className="w-3.5 h-3.5" />
@@ -592,13 +619,13 @@ export default function App() {
       <main className="flex-1 p-4 lg:p-6 max-w-7xl w-full mx-auto space-y-6">
         
         {/* Connection Status Banner */}
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/50 border border-slate-800 p-3 rounded-xl text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-[#EFE2C6] border border-[#DCC8A3]/30 p-3 rounded-xl text-xs">
           <div className="flex items-center space-x-2">
             <span className={`w-2.5 h-2.5 rounded-full ${
-              isConnected ? 'bg-emerald-400 animate-ping' : isDemoMode ? 'bg-amber-400 animate-pulse' : 'bg-slate-500'
+              isConnected ? 'bg-[#9B1D30] animate-ping' : isDemoMode ? 'bg-[#9B1D30] animate-pulse' : 'bg-[#9B1D30]/60'
             }`} />
-            <span className="text-slate-300 font-medium">Status: {connectionStatus}</span>
-            {portInfo && <span className="text-slate-500">({portInfo})</span>}
+            <span className="text-[#3B0A12]/85 font-medium">Status: {connectionStatus}</span>
+            {portInfo && <span className="text-[#3B0A12]/60">({portInfo})</span>}
           </div>
 
           <div className="flex items-center space-x-3">
@@ -607,8 +634,8 @@ export default function App() {
             </div>
             
             {/* Systolic flash indicator */}
-            <div className="flex items-center space-x-1.5 text-slate-400 bg-slate-950 px-2 py-1 rounded border border-slate-800">
-              <span className={`w-2 h-2 rounded-full ${isBeatActive ? 'bg-red-500 shadow-lg shadow-red-500' : 'bg-slate-700'}`} />
+            <div className="flex items-center space-x-1.5 text-[#3B0A12]/75 bg-[#F7ECD4] px-2 py-1 rounded border border-[#DCC8A3]/30">
+              <span className={`w-2 h-2 rounded-full ${isBeatActive ? 'bg-[#9B1D30] shadow-lg shadow-[#9B1D30]/40' : 'bg-[#F7ECD4]'}`} />
               <span className="font-mono text-[10px]">PULSE</span>
             </div>
           </div>
@@ -618,85 +645,85 @@ export default function App() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           
           {/* 1. Instantaneous BPM */}
-          <div className="bg-[#0f1726] border border-slate-800 rounded-2xl p-5 relative overflow-hidden group hover:border-slate-700 transition">
-            <div className="flex items-center justify-between text-slate-400 mb-2">
+          <div className="bg-[#F7ECD4] border border-[#DCC8A3]/30 rounded-2xl p-5 relative overflow-hidden group hover:border-[#B0303C] transition">
+            <div className="flex items-center justify-between text-[#3B0A12]/75 mb-2">
               <span className="text-xs uppercase tracking-wider font-semibold">Instant Heart Rate</span>
-              <Heart className={`w-4 h-4 ${isBeatActive ? 'text-red-500 scale-125' : 'text-slate-500'} transition-all`} />
+              <Heart className={`w-4 h-4 ${isBeatActive ? 'text-[#9B1D30] scale-125' : 'text-[#3B0A12]/60'} transition-all`} />
             </div>
             <div className="flex items-baseline space-x-2">
-              <span className="text-4xl font-extrabold text-white font-mono tracking-tight">
+              <span className="text-4xl font-extrabold text-[#3B0A12] font-mono tracking-tight">
                 {instantBpm ? instantBpm : '--'}
               </span>
-              <span className="text-sm font-medium text-slate-400">BPM</span>
+              <span className="text-sm font-medium text-[#3B0A12]/75">BPM</span>
             </div>
-            <p className="text-[11px] text-slate-500 mt-2">Latest single inter-beat interval (IBI)</p>
-            <div className="absolute top-0 right-0 h-1 w-full bg-gradient-to-r from-transparent via-red-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            <p className="text-[11px] text-[#3B0A12]/60 mt-2">Latest single inter-beat interval (IBI)</p>
+            <div className="absolute top-0 right-0 h-1 w-full bg-gradient-to-r from-transparent via-[#9B1D30] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
 
           {/* 2. Rolling Average BPM (Ref against commercial pulse oximeter) */}
-          <div className="bg-[#0f1726] border border-slate-800 rounded-2xl p-5 relative overflow-hidden group hover:border-slate-700 transition">
-            <div className="flex items-center justify-between text-slate-400 mb-2">
+          <div className="bg-[#F7ECD4] border border-[#DCC8A3]/30 rounded-2xl p-5 relative overflow-hidden group hover:border-[#B0303C] transition">
+            <div className="flex items-center justify-between text-[#3B0A12]/75 mb-2">
               <span className="text-xs uppercase tracking-wider font-semibold">10-Beat Average</span>
-              <Activity className="w-4 h-4 text-emerald-400" />
+              <Activity className="w-4 h-4 text-[#9B1D30]" />
             </div>
             <div className="flex items-baseline space-x-2">
-              <span className="text-4xl font-extrabold text-emerald-400 font-mono tracking-tight">
+              <span className="text-4xl font-extrabold text-[#9B1D30] font-mono tracking-tight">
                 {avgBpm ? avgBpm : '--'}
               </span>
-              <span className="text-sm font-medium text-slate-400">BPM</span>
+              <span className="text-sm font-medium text-[#3B0A12]/75">BPM</span>
             </div>
-            <p className="text-[11px] text-slate-500 mt-2">Primary validation target for judge scoring</p>
-            <div className="absolute top-0 right-0 h-1 w-full bg-gradient-to-r from-transparent via-emerald-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            <p className="text-[11px] text-[#3B0A12]/60 mt-2">Primary validation target for judge scoring</p>
+            <div className="absolute top-0 right-0 h-1 w-full bg-gradient-to-r from-transparent via-[#800020] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
 
           {/* 3. Pulse-Rate Variability (PRV / RMSSD in ms) */}
-          <div className="bg-[#0f1726] border border-slate-800 rounded-2xl p-5 relative overflow-hidden group hover:border-slate-700 transition">
-            <div className="flex items-center justify-between text-slate-400 mb-2">
+          <div className="bg-[#F7ECD4] border border-[#DCC8A3]/30 rounded-2xl p-5 relative overflow-hidden group hover:border-[#B0303C] transition">
+            <div className="flex items-center justify-between text-[#3B0A12]/75 mb-2">
               <span className="text-xs uppercase tracking-wider font-semibold">PRV (RMSSD)</span>
-              <TrendingUp className="w-4 h-4 text-cyan-400" />
+              <TrendingUp className="w-4 h-4 text-[#9B1D30]" />
             </div>
             <div className="flex items-baseline space-x-2">
-              <span className="text-4xl font-extrabold text-cyan-400 font-mono tracking-tight">
+              <span className="text-4xl font-extrabold text-[#9B1D30] font-mono tracking-tight">
                 {rmssd ? rmssd : '--'}
               </span>
-              <span className="text-sm font-medium text-slate-400">ms</span>
+              <span className="text-sm font-medium text-[#3B0A12]/75">ms</span>
             </div>
-            <p className="text-[11px] text-slate-500 mt-2">Parasympathetic autonomic nervous metric</p>
-            <div className="absolute top-0 right-0 h-1 w-full bg-gradient-to-r from-transparent via-cyan-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            <p className="text-[11px] text-[#3B0A12]/60 mt-2">Parasympathetic autonomic nervous metric</p>
+            <div className="absolute top-0 right-0 h-1 w-full bg-gradient-to-r from-transparent via-[#9B1D30] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
 
           {/* 4. Respiration Rate (Estimated from RSA baseline modulation) */}
-          <div className="bg-[#0f1726] border border-slate-800 rounded-2xl p-5 relative overflow-hidden group hover:border-slate-700 transition">
-            <div className="flex items-center justify-between text-slate-400 mb-2">
+          <div className="bg-[#F7ECD4] border border-[#DCC8A3]/30 rounded-2xl p-5 relative overflow-hidden group hover:border-[#B0303C] transition">
+            <div className="flex items-center justify-between text-[#3B0A12]/75 mb-2">
               <span className="text-xs uppercase tracking-wider font-semibold">Breathing Rate</span>
-              <Wind className="w-4 h-4 text-purple-400" />
+              <Wind className="w-4 h-4 text-[#9B1D30]" />
             </div>
             <div className="flex items-baseline space-x-2">
-              <span className="text-4xl font-extrabold text-purple-400 font-mono tracking-tight">
+              <span className="text-4xl font-extrabold text-[#9B1D30] font-mono tracking-tight">
                 {respirationRate ? respirationRate : '--'}
               </span>
-              <span className="text-sm font-medium text-slate-400">Br/min</span>
+              <span className="text-sm font-medium text-[#3B0A12]/75">Br/min</span>
             </div>
-            <p className="text-[11px] text-slate-500 mt-2">Derived from low-frequency optical wander</p>
-            <div className="absolute top-0 right-0 h-1 w-full bg-gradient-to-r from-transparent via-purple-500 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            <p className="text-[11px] text-[#3B0A12]/60 mt-2">Derived from low-frequency optical wander</p>
+            <div className="absolute top-0 right-0 h-1 w-full bg-gradient-to-r from-transparent via-[#9B1D30] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
         </div>
 
         {/* Oscilloscope Canvas & Waveform View */}
-        <div className="bg-[#0c121e] border border-slate-800 rounded-2xl p-4 lg:p-6 space-y-4">
+        <div className="bg-[#F7ECD4] border border-[#DCC8A3]/30 rounded-2xl p-4 lg:p-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center space-x-2">
-              <Activity className="w-5 h-5 text-emerald-400" />
-              <h2 className="font-semibold text-white tracking-wide text-sm lg:text-base">
+              <Activity className="w-5 h-5 text-[#9B1D30]" />
+              <h2 className="font-semibold text-[#3B0A12] tracking-wide text-sm lg:text-base">
                 Real-Time Optical PPG Oscilloscope
               </h2>
             </div>
 
             {/* Scope Tuning Controls */}
             <div className="flex flex-wrap items-center gap-3 text-xs">
-              <div className="flex items-center space-x-2 bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg">
-                <Sliders className="w-3.5 h-3.5 text-slate-400" />
-                <span className="text-slate-400">Gain:</span>
+              <div className="flex items-center space-x-2 bg-[#F7ECD4] border border-[#DCC8A3]/30 px-2.5 py-1.5 rounded-lg">
+                <Sliders className="w-3.5 h-3.5 text-[#3B0A12]/75" />
+                <span className="text-[#3B0A12]/75">Gain:</span>
                 <input 
                   type="range" 
                   min="0.5" 
@@ -704,15 +731,15 @@ export default function App() {
                   step="0.1" 
                   value={gain} 
                   onChange={(e) => setGain(parseFloat(e.target.value))}
-                  className="w-20 accent-emerald-500 cursor-pointer"
+                  className="w-20 accent-[#9B1D30] cursor-pointer"
                 />
-                <span className="font-mono text-slate-300 w-8">{gain}x</span>
+                <span className="font-mono text-[#3B0A12]/85 w-8">{gain}x</span>
               </div>
 
               <button
                 onClick={() => setShowThreshold(!showThreshold)}
                 className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition ${
-                  showThreshold ? 'bg-amber-500/20 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'
+                  showThreshold ? 'bg-[#800020]/30 border-[#DCC8A3]/50 text-[#9B1D30]' : 'bg-[#F7ECD4] border-[#DCC8A3]/30 text-[#3B0A12]/75'
                 }`}
               >
                 Adaptive Threshold
@@ -721,7 +748,7 @@ export default function App() {
               <button
                 onClick={() => setFilterEnabled(!filterEnabled)}
                 className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition ${
-                  filterEnabled ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-400'
+                  filterEnabled ? 'bg-[#800020]/30 border-[#DCC8A3]/50 text-[#9B1D30]' : 'bg-[#F7ECD4] border-[#DCC8A3]/30 text-[#3B0A12]/75'
                 }`}
               >
                 Noise Filter
@@ -730,14 +757,14 @@ export default function App() {
           </div>
 
           {/* Canvas Viewport */}
-          <div className="relative rounded-xl overflow-hidden border border-slate-800 bg-[#090d16] shadow-inner">
+          <div className="relative rounded-xl overflow-hidden border border-[#DCC8A3]/30 bg-[#FFF5E1] shadow-inner">
             <canvas 
               ref={canvasRef} 
               className="w-full h-[300px] block"
             />
             {/* Live Indicator overlay */}
-            <div className="absolute top-3 right-3 flex items-center space-x-1.5 bg-black/60 backdrop-blur px-2 py-1 rounded text-[11px] font-mono text-emerald-400 border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+            <div className="absolute top-3 right-3 flex items-center space-x-1.5 bg-[#EFE2C6] backdrop-blur px-2 py-1 rounded text-[11px] font-mono text-[#5E0F1A] border border-[#DCC8A3]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#9B1D30] animate-ping" />
               <span>100 Hz SAMPLING</span>
             </div>
           </div>
@@ -747,24 +774,24 @@ export default function App() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* Data Validation & Session Logging */}
-          <div className="lg:col-span-1 bg-[#0c121e] border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div className="lg:col-span-1 bg-[#F7ECD4] border border-[#DCC8A3]/30 rounded-2xl p-5 space-y-4">
             <div className="flex items-center space-x-2">
-              <FileSpreadsheet className="w-5 h-5 text-cyan-400" />
-              <h3 className="font-semibold text-white text-sm">Judge Validation & CSV Logger</h3>
+              <FileSpreadsheet className="w-5 h-5 text-[#9B1D30]" />
+              <h3 className="font-semibold text-[#3B0A12] text-sm">Judge Validation & CSV Logger</h3>
             </div>
             
-            <p className="text-xs text-slate-400 leading-relaxed">
+            <p className="text-xs text-[#3B0A12]/75 leading-relaxed">
               Record live raw ADC values and computed metrics to generate CSV logs for direct calibration against the commercial finger pulse oximeter.
             </p>
 
-            <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800 text-xs space-y-1.5 font-mono">
-              <div className="flex justify-between text-slate-400">
+            <div className="bg-[#F7ECD4] p-3 rounded-xl border border-[#DCC8A3]/30 text-xs space-y-1.5 font-mono">
+              <div className="flex justify-between text-[#3B0A12]/75">
                 <span>Samples Logged:</span>
-                <span className="text-slate-200">{recordedData.length}</span>
+                <span className="text-[#3B0A12]/90">{recordedData.length}</span>
               </div>
-              <div className="flex justify-between text-slate-400">
+              <div className="flex justify-between text-[#3B0A12]/75">
                 <span>Active State:</span>
-                <span className={isRecording ? 'text-red-400 animate-pulse font-bold' : 'text-slate-500'}>
+                <span className={isRecording ? 'text-[#9B1D30] animate-pulse font-bold' : 'text-[#3B0A12]/60'}>
                   {isRecording ? 'RECORDING IN PROGRESS' : 'IDLE'}
                 </span>
               </div>
@@ -774,9 +801,9 @@ export default function App() {
               <button
                 onClick={toggleRecording}
                 className={`flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded-lg text-xs font-semibold transition ${
-                  isRecording 
-                    ? 'bg-rose-600 hover:bg-rose-500 text-white' 
-                    : 'bg-cyan-600 hover:bg-cyan-500 text-black'
+                  isRecording
+                    ? 'bg-[#9B1D30] hover:bg-[#B0303C] text-[#FFF5E1]'
+                    : 'bg-[#800020] hover:bg-[#B0303C] text-[#FFF5E1]'
                 }`}
               >
                 {isRecording ? <Square className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
@@ -786,7 +813,7 @@ export default function App() {
               <button
                 onClick={exportCSV}
                 disabled={recordedData.length === 0}
-                className="flex items-center space-x-1.5 py-2 px-3 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 text-slate-200 border border-slate-700 transition"
+                className="flex items-center space-x-1.5 py-2 px-3 rounded-lg text-xs font-medium bg-[#F7ECD4] hover:bg-[#B0303C]/30 disabled:opacity-40 disabled:hover:bg-[#F7ECD4] text-[#3B0A12]/90 border border-[#DCC8A3]/50 transition"
               >
                 <Download className="w-4 h-4" />
                 <span>Export CSV</span>
@@ -795,39 +822,40 @@ export default function App() {
           </div>
 
           {/* Hackathon Rubric: Engineering Decisions & Hardware Setup Guide */}
-          <div className="lg:col-span-2 bg-[#0c121e] border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div className="lg:col-span-2 bg-[#F7ECD4] border border-[#DCC8A3]/30 rounded-2xl p-5 space-y-4">
             <div className="flex items-center space-x-2">
-              <HelpCircle className="w-5 h-5 text-amber-400" />
-              <h3 className="font-semibold text-white text-sm">Hardware Setup & Thonny Serial Format</h3>
+              <HelpCircle className="w-5 h-5 text-[#9B1D30]" />
+              <h3 className="font-semibold text-[#3B0A12] text-sm">Hardware Setup & Thonny Serial Format</h3>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="space-y-2 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
-                <div className="font-semibold text-slate-200 flex items-center space-x-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <div className="space-y-2 bg-[#F7ECD4] p-3.5 rounded-xl border border-[#DCC8A3]/30">
+                <div className="font-semibold text-[#3B0A12]/90 flex items-center space-x-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-[#9B1D30]" />
                   <span>MicroPython Print Format</span>
                 </div>
-                <p className="text-slate-400 leading-relaxed">
+                <p className="text-[#3B0A12]/75 leading-relaxed">
                   In your Pico script on Thonny, simply print the 16-bit ADC value in your sampling loop:
                 </p>
-                <code className="block bg-black/60 p-2 rounded text-emerald-400 font-mono text-[11px]">
+                <code className="block bg-[#EFE2C6] p-2 rounded text-[#9B1D30] font-mono text-[11px]">
                   print(adc.read_u16())
                 </code>
-                <p className="text-slate-500 text-[11px]">
+                <p className="text-[#3B0A12]/60 text-[11px]">
                   The Web Serial parser automatically handles raw integers or lines formatted with beat events.
                 </p>
               </div>
 
-              <div className="space-y-2 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800">
-                <div className="font-semibold text-slate-200 flex items-center space-x-1.5">
-                  <ShieldCheck className="w-4 h-4 text-cyan-400" />
-                  <span>Scoring Strategy (125 Pts)</span>
+              <div className="space-y-2 bg-[#F7ECD4] p-3.5 rounded-xl border border-[#DCC8A3]/30">
+                <div className="font-semibold text-[#3B0A12]/90 flex items-center space-x-1.5">
+                  <ShieldCheck className="w-4 h-4 text-[#9B1D30]" />
+                  <span>Live Sensor Status</span>
                 </div>
-                <ul className="text-slate-400 space-y-1 list-disc list-inside leading-relaxed text-[11px]">
-                  <li><strong className="text-slate-200">50 Pts (Sensing):</strong> Show side-by-side error within $\pm2$ BPM vs reference oximeter.</li>
-                  <li><strong className="text-slate-200">25 Pts (Usability):</strong> Optical barrier between emitter/detector prevents optical shunt.</li>
-                  <li><strong className="text-slate-200">35 Pts (Software):</strong> Real-time PRV (RMSSD) and breathing metrics demonstrate physiological depth.</li>
-                  <li><strong className="text-slate-200">15 Pts (Decisions):</strong> Document 2-stage active bandpass (0.7-5 Hz) trade-offs.</li>
+                <ul className="text-[#3B0A12]/75 space-y-1 list-disc list-inside leading-relaxed text-[11px]">
+                  <li><strong className="text-[#3B0A12]/90">Connection Status:</strong> {isConnected ? 'Connected' : 'Disconnected'}</li>
+                  <li><strong className="text-[#3B0A12]/90">Live ADC Reading:</strong> {latestAdc ?? 'N/A'}</li>
+                  <li><strong className="text-[#3B0A12]/90">Signal Quality:</strong> {latestAdc === null ? 'N/A' : signalQualityLabel}</li>
+                  <li><strong className="text-[#3B0A12]/90">Finger Detection:</strong> {latestAdc === null ? 'N/A' : signalQuality === 'NO_FINGER' ? 'Not Detected' : 'Detected'}</li>
+                  <li><strong className="text-[#3B0A12]/90">Sampling Status:</strong> {isReceivingData ? 'Receiving Data' : 'Waiting for Data'}</li>
                 </ul>
               </div>
             </div>
@@ -838,7 +866,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-800/80 bg-[#070b12] text-slate-500 text-xs px-6 py-4 flex flex-wrap justify-between items-center gap-3">
+      <footer className="border-t border-[#DCC8A3]/40 bg-[#FFF5E1] text-[#3B0A12]/60 text-xs px-6 py-4 flex flex-wrap justify-between items-center gap-3">
         <p>BMES Hackathon — Biomedical Optical Sensing Track</p>
         <p className="font-mono text-[11px]">Web Serial API • 100 Hz Low-Latency ADC Pipeline</p>
       </footer>
